@@ -1,67 +1,50 @@
 # HermesMenuBar
 
-Menu bar app per macOS che mostra lo stato di Hermes e pilota il servizio launchd
-del gateway.
+macOS menu bar app that shows Hermes' status and drives the gateway's launchd service.
 
-```
-🟢 Hermes
-──────────────────────────────
-Gateway: running (1h 34m)
-PID 14112 · ai.hermes.gateway
-──────────────────────────────
-Restart gateway
-Stop gateway
-──────────────────────────────
-Dashboard: running
-Ferma dashboard
-Apri nel browser :9119
-──────────────────────────────
-Log gateway
-Log errori
-──────────────────────────────
-Esci
-```
+<table>
+<tr>
+<td align="center"><img src="docs/menu-en.png" width="300" alt="HermesMenuBar menu in English"><br><sub><b>English</b></sub></td>
+<td align="center"><img src="docs/menu-it.png" width="300" alt="Menu di HermesMenuBar in italiano"><br><sub><b>Italiano</b></sub></td>
+</tr>
+</table>
 
-Gateway e dashboard hanno entrambi un toggle avvia/ferma. "Apri nel browser"
-resta grigio finché il dashboard non risponde davvero sulla porta.
+Gateway and dashboard each have a start/stop toggle. "Open in browser" is greyed out above because the dashboard is not answering on the port. The menu follows the system language — see [Language](#language).
 
-## Cosa pilota
+## What it drives
 
-Hermes gira come **due** processi distinti:
+Hermes runs as **two** separate processes:
 
-| | Cos'è | Ciclo di vita |
+| | What it is | Lifecycle |
 |---|---|---|
-| **gateway** | il servizio che fa funzionare Telegram & co. | launchd agent `ai.hermes.gateway`, parte al login, `KeepAlive` |
-| **dashboard** | la web UI su :9119 | processo foreground, muore col terminale |
+| **gateway** | the service that makes Telegram & co. work | launchd agent `ai.hermes.gateway`, starts at login, `KeepAlive` |
+| **dashboard** | the web UI on :9119 | foreground process, dies with the terminal |
 
-L'app segue il gateway via `launchctl` e sonda il dashboard con un connect TCP.
-Il PID viene riletto a ogni tick (3s): `KeepAlive` può riavviare il gateway in
-qualsiasi momento, quindi non viene mai memorizzato.
+The app tracks the gateway through `launchctl` and probes the dashboard with a TCP connect. The PID is re-read on every tick (3s): `KeepAlive` can restart the gateway at any moment, so it is never cached.
 
-## Installazione
+## Installation
 
 ```bash
-./install.sh      # installa rumps se manca, registra l'agent, avvia l'app
-./uninstall.sh    # rimuove tutto
+./install.sh      # installs rumps if missing, registers the agent, starts the app
+./uninstall.sh    # removes everything
 ```
 
-Dopo `install.sh` l'app è già in esecuzione e riparte a ogni login: non serve
-avviarla a mano.
+After `install.sh` the app is already running and comes back at every login — no need to start it by hand.
 
-## Comandi
+## Commands
 
 ### Menu bar app
 
 ```bash
 L=dev.trapias.hermes-menubar
 
-launchctl list $L                    # stato + PID
-launchctl kickstart -k gui/$UID/$L   # riavvia (anche per ricaricare il codice)
-launchctl bootout   gui/$UID/$L      # ferma
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$L.plist   # riavvia
+launchctl list $L                    # status + PID
+launchctl kickstart -k gui/$UID/$L   # restart (also how you reload the code)
+launchctl bootout   gui/$UID/$L      # stop
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$L.plist   # start again
 ```
 
-A mano, fuori da launchd — utile per vedere gli errori a schermo:
+By hand, outside launchd — useful to see errors on screen:
 
 ```bash
 cd ~/Dev/Priv/HermesMenuBar
@@ -73,49 +56,80 @@ cd ~/Dev/Priv/HermesMenuBar
 ```bash
 hermes gateway status
 hermes gateway start | stop | restart
-hermes gateway install --force       # rigenera il plist (serve dopo un cambio di PATH)
+hermes gateway install --force       # regenerate the plist (needed after a PATH change)
 tail -f ~/.hermes/logs/gateway.log
 ```
 
 ### Dashboard
 
 ```bash
-hermes dashboard --no-open           # avvia (foreground, muore col terminale)
-hermes dashboard --status            # elenca i web server attivi
-hermes dashboard --stop              # ferma tutti i web server
+hermes dashboard --no-open           # start (foreground, dies with the terminal)
+hermes dashboard --status            # list the running web servers
+hermes dashboard --stop              # stop all web servers
 ```
 
-L'app la lancia staccata (`start_new_session`), quindi avviata dal menu
-sopravvive sia al terminale sia alla menu bar app stessa.
+The app launches it detached (`start_new_session`), so a dashboard started from the menu outlives both the terminal and the menu bar app itself.
 
-### Log
+### Logs
 
-| Cosa | Dove |
+| What | Where |
 |---|---|
 | menu bar app | `~/Library/Logs/hermes-menubar.error.log` |
-| dashboard avviato dal menu | `~/Library/Logs/hermes-dashboard.log` |
+| dashboard started from the menu | `~/Library/Logs/hermes-dashboard.log` |
 | gateway | `~/.hermes/logs/gateway.log` · `gateway.error.log` |
 
-L'agent è `dev.trapias.hermes-menubar` — namespace separato di proposito:
-Hermes fa sweep su `ai.hermes.gateway*` e `hermes update` tocca `ai.hermes.*`,
-quindi un plist lì dentro rischierebbe di essere rimosso da un aggiornamento.
+The agent is `dev.trapias.hermes-menubar` — a deliberately separate namespace: Hermes sweeps `ai.hermes.gateway*` and `hermes update` touches `ai.hermes.*`, so a plist in there would risk being wiped out by an update.
 
-`LimitLoadToSessionType: Aqua` perché una menu bar richiede una sessione grafica:
-l'app non viene caricata in sessioni SSH o di background.
+`LimitLoadToSessionType: Aqua` because a menu bar needs a graphical session: the app is not loaded in SSH or background sessions.
 
-## Note
+## Language
 
-- Le operazioni lente (`hermes gateway restart`, avvio del dashboard) girano su
-  un thread separato: rumps vive sul main thread di Cocoa e si congelerebbe.
-- Il plist del **gateway** è statico. Se cambi PATH (nuovo Node via nvm, ffmpeg
-  via brew) rilancia `hermes gateway install` o il gateway resta col PATH vecchio.
-- I log si aprono in Console.app, che li segue in tempo reale.
+The UI ships in English and Italian — both are shown side by side at the top of this README. On startup the app reads the system's preferred languages (`AppleLanguages`, i.e. System Settings › Language & Region) and picks the first one it can speak, falling back to English:
 
-## Configurazione
+| System languages | Menu |
+|---|---|
+| `it-IT` | Italian |
+| `en-GB`, `it` | English |
+| `fr-FR`, `it`, `en` | Italian — the first *supported* entry wins |
+| `de-DE` | English |
 
-Via variabili d'ambiente, lette all'avvio:
+To pin a language regardless of the system, set `HERMES_MENUBAR_LANG` (`en` or `it`; an unknown value falls back to English):
+
+```bash
+HERMES_MENUBAR_LANG=en ./install.sh
+```
+
+It has to go through `install.sh` because launchd agents do not inherit the shell environment — exporting the variable in your terminal has no effect on the app started at login. `install.sh` writes it into the generated plist, so it also survives a reinstall.
+
+To change it on an installed agent without reinstalling:
+
+```bash
+L=dev.trapias.hermes-menubar
+/usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:HERMES_MENUBAR_LANG en" \
+    ~/Library/LaunchAgents/$L.plist          # 'Add' instead of 'Set' the first time
+launchctl kickstart -k gui/$UID/$L
+```
+
+Running by hand, the plain environment variable works as usual:
+
+```bash
+HERMES_MENUBAR_LANG=it ~/.hermes/hermes-agent/venv/bin/python hermes_menubar.py
+```
+
+Adding a language means adding one entry to `STRINGS` in `hermes_menubar.py`. English is the base: `t()` falls back to it key by key, so a partial translation degrades to English strings instead of breaking the menu.
+
+## Notes
+
+- Slow operations (`hermes gateway restart`, starting the dashboard) run on a separate thread: rumps lives on Cocoa's main thread and would freeze.
+- The **gateway** plist is static. If you change PATH (new Node via nvm, ffmpeg via brew), run `hermes gateway install` again or the gateway keeps the old PATH.
+- Logs open in Console.app, which follows them in real time.
+
+## Configuration
+
+Through environment variables, read at startup:
 
 | Var | Default |
 |---|---|
 | `HERMES_HOME` | `~/.hermes` |
 | `HERMES_DASHBOARD_PORT` | `9119` |
+| `HERMES_MENUBAR_LANG` | *(system language, else `en`)* |
