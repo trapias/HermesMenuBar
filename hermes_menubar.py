@@ -19,6 +19,30 @@ from pathlib import Path
 
 import rumps
 
+APP_NAME = "Hermes MenuBar"
+
+
+def _claim_bundle_name(name: str) -> None:
+    """Make macOS call this process *name* instead of "Python".
+
+    A plain python process inherits the interpreter's CFBundleName, which
+    surfaces in the menu bar, the app switcher and Force Quit. Patching the
+    main bundle's info dictionary is the standard fix, and it only takes
+    effect if it happens before NSApplication is instantiated — hence at
+    import time, not inside App.__init__.
+    """
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info is not None:
+            info["CFBundleName"] = name
+    except Exception:
+        pass  # cosmetic only — never block startup over a label
+
+
+_claim_bundle_name(APP_NAME)
+
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
 HERMES_BIN = HERMES_HOME / "hermes-agent" / "venv" / "bin" / "hermes"
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
@@ -106,7 +130,7 @@ def port_is_open(port: int) -> bool:
 
 class HermesMenuBar(rumps.App):
     def __init__(self) -> None:
-        super().__init__("HermesMenuBar", title=ICON_BUSY, quit_button=None)
+        super().__init__(APP_NAME, title=ICON_BUSY, quit_button=None)
         self.label = launchd_label()
         self._busy = False
         self._dash_pending = False
@@ -145,6 +169,21 @@ class HermesMenuBar(rumps.App):
         self.timer = rumps.Timer(self.refresh, REFRESH_SECONDS)
         self.timer.start()
         self.refresh(None)
+
+        # The NSStatusItem does not exist until rumps has started the app,
+        # so the tooltip is applied on the first tick rather than here.
+        self._tooltip_timer = rumps.Timer(self._apply_tooltip, 1)
+        self._tooltip_timer.start()
+
+    def _apply_tooltip(self, timer) -> None:
+        """Set the hover tooltip on the status item, then stop trying."""
+        timer.stop()
+        try:
+            item = self._nsapp.nsstatusitem
+            button = item.button() if hasattr(item, "button") else None
+            (button or item).setToolTip_(APP_NAME)
+        except Exception:
+            pass  # cosmetic only
 
     # ── refresh ──────────────────────────────────────────────────────────
 
@@ -236,7 +275,7 @@ class HermesMenuBar(rumps.App):
             )
             self._dash_pending = True
         except OSError as exc:
-            rumps.notification("HermesMenuBar", "Avvio dashboard fallito", str(exc))
+            rumps.notification(APP_NAME, "Avvio dashboard fallito", str(exc))
 
     def on_open_dashboard(self, _) -> None:
         webbrowser.open(f"http://127.0.0.1:{DASHBOARD_PORT}")
@@ -253,7 +292,7 @@ def open_in_console(path: Path) -> None:
     if path.exists():
         subprocess.Popen(["open", "-a", "Console", str(path)])
     else:
-        rumps.notification("HermesMenuBar", "Log non trovato", str(path))
+        rumps.notification(APP_NAME, "Log non trovato", str(path))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
