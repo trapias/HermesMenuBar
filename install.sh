@@ -22,6 +22,18 @@ sed -e "s|__PYTHON__|$PYTHON|g" \
     -e "s|__ERRLOG__|$LOGDIR/hermes-menubar.error.log|g" \
     "$REPO/$LABEL.plist" > "$PLIST"
 
+# Optional UI language override. Without it the app follows the system
+# language (AppleLanguages) and falls back to English. It goes in the plist
+# because launchd agents do not inherit the shell environment, and it is
+# applied here so a reinstall does not silently drop it:
+#   HERMES_MENUBAR_LANG=en ./install.sh
+if [ -n "${HERMES_MENUBAR_LANG:-}" ]; then
+    /usr/libexec/PlistBuddy \
+        -c "Add :EnvironmentVariables:HERMES_MENUBAR_LANG string $HERMES_MENUBAR_LANG" \
+        "$PLIST" >/dev/null
+    echo "Lingua interfaccia: $HERMES_MENUBAR_LANG"
+fi
+
 # Replace any previous instance, launchd-owned or hand-started.
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
 pkill -f hermes_menubar.py 2>/dev/null || true

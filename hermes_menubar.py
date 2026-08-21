@@ -55,6 +55,134 @@ ICON_STOPPED = "🔴"
 ICON_BUSY = "🟡"
 
 
+# ── i18n ───────────────────────────────────────────────────────────────────
+#
+# English is the *base* language, not merely the default: every key exists
+# under "en" and t() falls back to it key by key, so a half-finished locale
+# degrades to English instead of raising KeyError inside a refresh tick.
+
+STRINGS: dict[str, dict[str, str]] = {
+    "en": {
+        "gateway_loading": "Gateway: …",
+        "gateway_running": "Gateway: running",
+        "gateway_running_for": "Gateway: running ({uptime})",
+        "gateway_stopped": "Gateway: stopped",
+        "gateway_starting": "Gateway: starting…",
+        "gateway_stopping": "Gateway: stopping…",
+        "gateway_restarting": "Gateway: restarting…",
+        "gateway_start": "Start gateway",
+        "gateway_stop": "Stop gateway",
+        "gateway_restart": "Restart gateway",
+        "dashboard_loading": "Dashboard: …",
+        "dashboard_running": "Dashboard: running",
+        "dashboard_stopped": "Dashboard: stopped",
+        "dashboard_starting": "Dashboard: starting…",
+        "dashboard_stopping": "Dashboard: stopping…",
+        "dashboard_start": "Start dashboard",
+        "dashboard_stop": "Stop dashboard",
+        "dashboard_open": "Open in browser :{port}",
+        "dashboard_failed": "Could not start the dashboard",
+        "log_gateway": "Gateway log",
+        "log_errors": "Error log",
+        "log_missing": "Log not found",
+        "quit": "Quit",
+        "uptime_days": "{days}d {hours}h",
+        "uptime_hours": "{hours}h {minutes}m",
+        "uptime_minutes": "{minutes}m",
+    },
+    "it": {
+        "gateway_loading": "Gateway: …",
+        "gateway_running": "Gateway: in esecuzione",
+        "gateway_running_for": "Gateway: in esecuzione ({uptime})",
+        "gateway_stopped": "Gateway: fermo",
+        "gateway_starting": "Gateway: avvio…",
+        "gateway_stopping": "Gateway: arresto…",
+        "gateway_restarting": "Gateway: riavvio…",
+        "gateway_start": "Avvia gateway",
+        "gateway_stop": "Ferma gateway",
+        "gateway_restart": "Riavvia gateway",
+        "dashboard_loading": "Dashboard: …",
+        "dashboard_running": "Dashboard: in esecuzione",
+        "dashboard_stopped": "Dashboard: ferma",
+        "dashboard_starting": "Dashboard: avvio…",
+        "dashboard_stopping": "Dashboard: arresto…",
+        "dashboard_start": "Avvia dashboard",
+        "dashboard_stop": "Ferma dashboard",
+        "dashboard_open": "Apri nel browser :{port}",
+        "dashboard_failed": "Avvio dashboard fallito",
+        "log_gateway": "Log gateway",
+        "log_errors": "Log errori",
+        "log_missing": "Log non trovato",
+        "quit": "Esci",
+        "uptime_days": "{days}g {hours}h",
+        "uptime_hours": "{hours}h {minutes}m",
+        "uptime_minutes": "{minutes}m",
+    },
+}
+
+
+def system_languages() -> list[str]:
+    """The user's preferred UI languages, most-preferred first (['it', 'en']).
+
+    Read from AppleLanguages rather than $LANG: this app normally runs as a
+    launchd agent, which inherits a minimal environment where LANG is unset,
+    while NSUserDefaults reflects what System Settings actually says.
+    Region subtags are dropped — 'it-IT' and 'it-CH' are both 'it' here.
+    """
+    try:
+        from Foundation import NSUserDefaults
+        prefs = NSUserDefaults.standardUserDefaults().stringArrayForKey_(
+            "AppleLanguages"
+        )
+    except Exception:
+        prefs = None  # not a GUI session, or PyObjC unavailable
+    return [str(tag).split("-")[0].lower() for tag in (prefs or [])]
+
+
+def normalize_lang(tag: str) -> str:
+    """'it_IT.UTF-8', 'IT-it' → 'it'. Accepts whatever a human typed in the env."""
+    return tag.strip().lower().replace("_", "-").split(".")[0].split("-")[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# DECISION POINT — how far down the preference list to look.
+#
+# macOS hands over a *ranked* list, and the interesting case is a system set
+# to something we do not translate, e.g. ['fr', 'it', 'en']:
+#
+#   walk the list : first supported entry wins → Italian. Matches what
+#       NSLocalizedString does natively, and respects a second choice the
+#       user deliberately ranked above English.
+#
+#   first entry only : unsupported head → English. Blunter, but never
+#       surprises someone whose primary language simply is not offered.
+#
+# Default below walks the list. Swap the body if you prefer the other rule.
+# ─────────────────────────────────────────────────────────────────────────
+
+def resolve_language(preferred: list[str]) -> str:
+    """Pick the UI language from a ranked list, falling back to English."""
+    for tag in preferred:
+        if tag in STRINGS:
+            return tag
+    return "en"
+
+
+# HERMES_MENUBAR_LANG overrides the system entirely — an unknown value still
+# resolves to English rather than failing to launch.
+LANG = resolve_language(
+    [normalize_lang(os.environ["HERMES_MENUBAR_LANG"])]
+    if os.environ.get("HERMES_MENUBAR_LANG", "").strip()
+    else system_languages()
+)
+
+
+def t(key: str, **fmt: object) -> str:
+    """Localized string for *key*, formatted with *fmt*."""
+    text = STRINGS.get(LANG, {}).get(key) or STRINGS["en"][key]
+    return text.format(**fmt) if fmt else text
+
+
 # ── status probes ────────────────────────────────────────────────────────────
 
 def launchd_label() -> str:
@@ -115,8 +243,8 @@ def process_uptime(pid: int) -> str:
     else:
         return raw
     if days:
-        return f"{int(days)}g {h}h"
-    return f"{h}h {m}m" if h else f"{m}m"
+        return t("uptime_days", days=int(days), hours=h)
+    return t("uptime_hours", hours=h, minutes=m) if h else t("uptime_minutes", minutes=m)
 
 
 def port_is_open(port: int) -> bool:
@@ -135,19 +263,19 @@ class HermesMenuBar(rumps.App):
         self._busy = False
         self._dash_pending = False
 
-        self.m_status = rumps.MenuItem("Gateway: …")
+        self.m_status = rumps.MenuItem(t("gateway_loading"))
         self.m_pid = rumps.MenuItem("")
-        self.m_toggle = rumps.MenuItem("Stop gateway", callback=self.on_toggle)
-        self.m_restart = rumps.MenuItem("Restart gateway", callback=self.on_restart)
-        self.m_dash_state = rumps.MenuItem("Dashboard: …")
+        self.m_toggle = rumps.MenuItem(t("gateway_stop"), callback=self.on_toggle)
+        self.m_restart = rumps.MenuItem(t("gateway_restart"), callback=self.on_restart)
+        self.m_dash_state = rumps.MenuItem(t("dashboard_loading"))
         self.m_dash_toggle = rumps.MenuItem(
-            "Avvia dashboard", callback=self.on_toggle_dashboard
+            t("dashboard_start"), callback=self.on_toggle_dashboard
         )
         self.m_dash_open = rumps.MenuItem(
-            f"Apri nel browser :{DASHBOARD_PORT}", callback=self.on_open_dashboard
+            t("dashboard_open", port=DASHBOARD_PORT), callback=self.on_open_dashboard
         )
-        self.m_log = rumps.MenuItem("Log gateway", callback=self.on_log)
-        self.m_errlog = rumps.MenuItem("Log errori", callback=self.on_errlog)
+        self.m_log = rumps.MenuItem(t("log_gateway"), callback=self.on_log)
+        self.m_errlog = rumps.MenuItem(t("log_errors"), callback=self.on_errlog)
 
         self.menu = [
             self.m_status,
@@ -163,7 +291,7 @@ class HermesMenuBar(rumps.App):
             self.m_log,
             self.m_errlog,
             None,
-            rumps.MenuItem("Esci", callback=rumps.quit_application),
+            rumps.MenuItem(t("quit"), callback=rumps.quit_application),
         ]
 
         self.timer = rumps.Timer(self.refresh, REFRESH_SECONDS)
@@ -195,24 +323,30 @@ class HermesMenuBar(rumps.App):
         if pid:
             up = process_uptime(pid)
             self.title = ICON_RUNNING
-            self.m_status.title = f"Gateway: running ({up})" if up else "Gateway: running"
+            self.m_status.title = (
+                t("gateway_running_for", uptime=up) if up else t("gateway_running")
+            )
             self.m_pid.title = f"PID {pid}  ·  {self.label}"
-            self.m_toggle.title = "Stop gateway"
+            self.m_toggle.title = t("gateway_stop")
         else:
             self.title = ICON_STOPPED
-            self.m_status.title = "Gateway: stopped"
+            self.m_status.title = t("gateway_stopped")
             self.m_pid.title = self.label
-            self.m_toggle.title = "Start gateway"
+            self.m_toggle.title = t("gateway_start")
 
         dash = port_is_open(DASHBOARD_PORT)
         if dash:
             self._dash_pending = False
         if self._dash_pending:
-            self.m_dash_state.title = "Dashboard: starting…"
-            self.m_dash_toggle.title = "Ferma dashboard"
+            self.m_dash_state.title = t("dashboard_starting")
+            self.m_dash_toggle.title = t("dashboard_stop")
         else:
-            self.m_dash_state.title = f"Dashboard: {'running' if dash else 'stopped'}"
-            self.m_dash_toggle.title = "Ferma dashboard" if dash else "Avvia dashboard"
+            self.m_dash_state.title = t(
+                "dashboard_running" if dash else "dashboard_stopped"
+            )
+            self.m_dash_toggle.title = t(
+                "dashboard_stop" if dash else "dashboard_start"
+            )
         # Greyed out until there is actually something to open.
         self.m_dash_open.set_callback(self.on_open_dashboard if dash else None)
 
@@ -237,18 +371,22 @@ class HermesMenuBar(rumps.App):
 
     def on_toggle(self, _) -> None:
         if gateway_pid(self.label):
-            self._run_async([str(HERMES_BIN), "gateway", "stop"], "Gateway: stopping…")
+            self._run_async(
+                [str(HERMES_BIN), "gateway", "stop"], t("gateway_stopping")
+            )
         else:
-            self._run_async([str(HERMES_BIN), "gateway", "start"], "Gateway: starting…")
+            self._run_async(
+                [str(HERMES_BIN), "gateway", "start"], t("gateway_starting")
+            )
 
     def on_restart(self, _) -> None:
-        self._run_async(restart_command(self.label), "Gateway: restarting…")
+        self._run_async(restart_command(self.label), t("gateway_restarting"))
 
     def on_toggle_dashboard(self, _) -> None:
         if port_is_open(DASHBOARD_PORT) or self._dash_pending:
             self._dash_pending = False
             self._run_async(
-                [str(HERMES_BIN), "dashboard", "--stop"], "Dashboard: stopping…"
+                [str(HERMES_BIN), "dashboard", "--stop"], t("dashboard_stopping")
             )
         else:
             self.start_dashboard()
@@ -275,7 +413,7 @@ class HermesMenuBar(rumps.App):
             )
             self._dash_pending = True
         except OSError as exc:
-            rumps.notification(APP_NAME, "Avvio dashboard fallito", str(exc))
+            rumps.notification(APP_NAME, t("dashboard_failed"), str(exc))
 
     def on_open_dashboard(self, _) -> None:
         webbrowser.open(f"http://127.0.0.1:{DASHBOARD_PORT}")
@@ -292,7 +430,7 @@ def open_in_console(path: Path) -> None:
     if path.exists():
         subprocess.Popen(["open", "-a", "Console", str(path)])
     else:
-        rumps.notification(APP_NAME, "Log non trovato", str(path))
+        rumps.notification(APP_NAME, t("log_missing"), str(path))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
